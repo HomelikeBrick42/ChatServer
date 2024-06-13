@@ -7,9 +7,52 @@ enum Command {
     Send(String),
 }
 
+async fn client(mut commands: tokio::sync::mpsc::Receiver<Command>) -> anyhow::Result<()> {
+    let mut stream = TcpStream::connect("127.0.0.1:1234").await?;
+    let (mut reader, mut writer) = stream.split();
+    'outer_loop: loop {
+        tokio::pin! {
+            let reading_future = read_message(&mut reader);
+        }
+
+        loop {
+            tokio::select! {
+                message = &mut reading_future => {
+                    match message? {
+                        ServerToClientMessage::Ping => {
+                            send_message(&mut writer, ClientToServerMessage::Ping).await?;
+                            println!("pinged");
+                        }
+                        ServerToClientMessage::Joined(addr) => {
+                            println!("{addr} joined");
+                        }
+                        ServerToClientMessage::Left(addr) => {
+                            println!("{addr} left");
+                        }
+                        ServerToClientMessage::Sent(message, addr) => {
+                            println!("{addr}: {message}");
+                        }
+                    }
+                    continue 'outer_loop;
+                }
+
+                Some(command) = commands.recv() => match command {
+                    Command::Quit => break 'outer_loop,
+                    Command::Ping => send_message(&mut writer, ClientToServerMessage::Ping).await?,
+                    Command::Send(message) => send_message(&mut writer, ClientToServerMessage::Send(message)).await?,
+                },
+            }
+        }
+    }
+
+    send_message(&mut writer, ClientToServerMessage::Leave).await?;
+    stream.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (commands_sender, mut commands) = tokio::sync::mpsc::channel(1);
+    let (commands_sender, commands) = tokio::sync::mpsc::channel(1);
     std::thread::spawn({
         let commands_sender = commands_sender.clone();
         move || {
@@ -36,47 +79,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let mut stream = TcpStream::connect("127.0.0.1:1234").await?;
-    let (mut reader, mut writer) = stream.split();
-    'outer_loop: loop {
-        tokio::pin! {
-            let reading_future = read_message(&mut reader);
-        }
+    tokio::spawn(client(commands)).await??;
 
-        loop {
-            tokio::select! {
-                message = &mut reading_future => {
-                    match message? {
-                        ServerToClientMessage::Ping => {
-                            commands_sender.send(Command::Ping).await.unwrap();
-                        }
-                        ServerToClientMessage::Joined(addr) => {
-                            println!("{addr} joined");
-                        }
-                        ServerToClientMessage::Left(addr) => {
-                            println!("{addr} left");
-                        }
-                        ServerToClientMessage::Sent(message, addr) => {
-                            println!("{addr}: {message}");
-                        }
-                    }
-                    continue 'outer_loop;
-                }
-
-                Some(command) = commands.recv() => match command {
-                    Command::Quit => break 'outer_loop,
-                    Command::Ping => {
-                        send_message(&mut writer, ClientToServerMessage::Ping).await?;
-                    },
-                    Command::Send(message) => {
-                        send_message(&mut writer, ClientToServerMessage::Send(message)).await?;
-                    }
-                },
-            }
-        }
-    }
-
-    send_message(&mut writer, ClientToServerMessage::Leave).await?;
-    stream.shutdown().await?;
     Ok(())
 }

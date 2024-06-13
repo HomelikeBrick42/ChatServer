@@ -52,34 +52,6 @@ enum Command {
     Ping,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let (commands_sender, commands) = tokio::sync::mpsc::channel(1);
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lines().map_while(Result::ok) {
-            let mut tokens = line.split_whitespace();
-            if commands_sender
-                .blocking_send(match tokens.next() {
-                    None => continue,
-                    Some("quit") => Command::Quit,
-                    Some("ping") => Command::Ping,
-                    Some(_) => {
-                        eprintln!("Unknown command: '{line}'");
-                        continue;
-                    }
-                })
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-
-    tokio::spawn(server(commands)).await??;
-
-    Ok(())
-}
-
 async fn server(mut commands: tokio::sync::mpsc::Receiver<Command>) -> anyhow::Result<()> {
     let (to_clients, _) = tokio::sync::broadcast::channel(16);
     let (from_client_messages_sender, mut from_client_messages) = tokio::sync::mpsc::channel(1);
@@ -119,5 +91,33 @@ async fn server(mut commands: tokio::sync::mpsc::Receiver<Command>) -> anyhow::R
             else => {}
         }
     }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let (commands_sender, commands) = tokio::sync::mpsc::channel(1);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lines().map_while(Result::ok) {
+            let mut tokens = line.split_whitespace();
+            if commands_sender
+                .blocking_send(match tokens.next() {
+                    None => continue,
+                    Some("quit") => Command::Quit,
+                    Some("ping") => Command::Ping,
+                    Some(_) => {
+                        eprintln!("Unknown command: '{line}'");
+                        continue;
+                    }
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    tokio::spawn(server(commands)).await??;
+
     Ok(())
 }
