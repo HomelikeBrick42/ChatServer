@@ -1,0 +1,10 @@
+[package]
+name = "chat_system"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1.0.86" }
+ciborium = "0.2.2"
+serde = { version = "1.0.203", features = ["derive"] }
+tokio = { version = "1.38.0", features = ["io-std", "io-util", "net", "parking_lot", "rt-multi-thread", "macros", "fs", "sync", "time"] }
